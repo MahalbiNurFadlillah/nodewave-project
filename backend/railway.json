@@ -1,10 +1,10 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "RAILPACK"
   },
   "deploy": {
-    "startCommand": "chmod +x node_modules/.bin/tsx 2>/dev/null; bunx tsx src/index.ts",
+    "startCommand": "bun run start",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
