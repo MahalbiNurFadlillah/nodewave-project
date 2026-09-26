@@ -4,6 +4,7 @@
   "description": "High-Value Project Deliverables Management API with State-Based Permissions, Dependency Graph, Optimistic Concurrency, and Multi-Tenant Masking",
   "type": "module",
   "scripts": {
+    "postinstall": "bunx prisma generate",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "bun build src/index.ts --target bun --outdir dist",
