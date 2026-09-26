@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "bunx prisma generate",
     "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "start": "bunx tsx src/index.ts",
     "build": "bun build src/index.ts --target bun --outdir dist",
     "test": "bun test",
     "prisma:generate": "bunx prisma generate",
