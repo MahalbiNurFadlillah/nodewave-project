@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PRODUCT_MANAGER
+  INTERNAL_TEAM
+  CLIENT_GUEST
+}
+
+enum Department {
+  PM
+  UIUX
+  FRONTEND
+  BACKEND
+  CLIENT
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+model User {
+  id             String      @id @default(cuid())
+  email          String      @unique
+  passwordHash   String
+  name           String
+  avatarUrl      String?
+  role           Role
+  department     Department?
+  clientTenantId String?     // Tenant identifier for Client Guest multi-tenant isolation
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  memberships    ProjectMember[]
+  assignedTasks  Task[]          @relation("TaskAssignee")
+  uploadedFiles  Attachment[]    @relation("AttachmentUploader")
+  comments       Comment[]       @relation("CommentAuthor")
+  auditLogs      AuditLog[]      @relation("AuditUser")
+
+  @@index([role])
+  @@index([department])
+  @@index([clientTenantId])
+  @@index([deletedAt])
+}
+
+model Project {
+  id             String          @id @default(cuid())
+  name           String
+  description    String?
+  status         ProjectStatus   @default(ACTIVE)
+  clientTenantId String?         // Matches User.clientTenantId for Client Guest isolation
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  members        ProjectMember[]
+  tasks          Task[]
+  auditLogs      AuditLog[]
+
+  @@index([clientTenantId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model ProjectMember {
+  id            String    @id @default(cuid())
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleInProject String?   // e.g. "Lead Designer", "Frontend Engineer", "Backend Lead"
+  createdAt     DateTime  @default(now())
+  deletedAt     DateTime?
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@index([projectId])
+  @@index([deletedAt])
+}
+
+model Task {
+  id              String      @id @default(cuid())
+  projectId       String
+  project         Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title           String
+  description     String      @default("")
+  department      Department  // UIUX, FRONTEND, BACKEND, PM
+  status          TaskStatus  @default(TODO)
+  assigneeId      String?
+  assignee        User?       @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  isClientVisible Boolean     @default(false)
+  version         Int         @default(1) // Optimistic Locking Version Token
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+
+  // Directed Acyclic Graph (DAG) Dependencies
+  // Prerequisites: Tasks that must be completed BEFORE this task can start
+  prerequisites   TaskDependency[] @relation("DependentTasks")
+  // Dependents: Tasks that depend on this task to be completed first
+  dependents      TaskDependency[] @relation("PrerequisiteTasks")
+
+  attachments     Attachment[]
+  comments        Comment[]
+  auditLogs       AuditLog[]
+
+  @@index([projectId])
+  @@index([department])
+  @@index([status])
+  @@index([assigneeId])
+  @@index([isClientVisible])
+  @@index([deletedAt])
+}
+
+model TaskDependency {
+  id                 String   @id @default(cuid())
+  prerequisiteTaskId String
+  prerequisiteTask   Task     @relation("PrerequisiteTasks", fields: [prerequisiteTaskId], references: [id], onDelete: Cascade)
+  dependentTaskId    String
+  dependentTask      Task     @relation("DependentTasks", fields: [dependentTaskId], references: [id], onDelete: Cascade)
+  createdAt          DateTime @default(now())
+
+  @@unique([prerequisiteTaskId, dependentTaskId])
+  @@index([prerequisiteTaskId])
+  @@index([dependentTaskId])
+}
+
+model Attachment {
+  id           String    @id @default(cuid())
+  taskId       String
+  task         Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileName     String
+  fileUrl      String
+  fileSize     Int
+  fileType     String
+  uploadedById String
+  uploadedBy   User      @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  @@index([taskId])
+  @@index([uploadedById])
+  @@index([deletedAt])
+}
+
+model Comment {
+  id         String    @id @default(cuid())
+  taskId     String
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User      @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  content    String
+  isInternal Boolean   @default(true) // Masked from Client Guest API responses
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  @@index([taskId])
+  @@index([authorId])
+  @@index([deletedAt])
+}
+
+model AuditLog {
+  id            String    @id @default(cuid())
+  entityName    String    // 'Task' or 'Project'
+  entityId      String
+  projectId     String?
+  project       Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId        String?
+  task          Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation("AuditUser", fields: [userId], references: [id], onDelete: Cascade)
+  action        String    // 'CREATE', 'UPDATE', 'STATUS_CHANGE', 'DEPENDENCY_ADD', 'DEPENDENCY_REMOVE', 'SOFT_DELETE'
+  changedColumn String?   // e.g. 'status', 'description', 'assigneeId', 'version'
+  oldValue      String?   // JSON or text string of old state
+  newValue      String?   // JSON or text string of new state
+  createdAt     DateTime  @default(now())
+
+  @@index([entityName, entityId])
+  @@index([projectId])
+  @@index([taskId])
+  @@index([userId])
+  @@index([createdAt])
+}
